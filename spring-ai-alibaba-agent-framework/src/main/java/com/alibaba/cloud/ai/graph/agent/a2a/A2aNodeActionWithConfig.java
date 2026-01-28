@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Supplier;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
@@ -77,6 +78,8 @@ public class A2aNodeActionWithConfig implements NodeActionWithConfig {
 
 	private CompileConfig parentCompileConfig;
 
+	private Supplier<String> tokenProvider;
+
 
 	public A2aNodeActionWithConfig(AgentCardWrapper agentCard, String agentName, boolean includeContents, String outputKeyToParent, String instruction, boolean streaming) {
 		this.agentName = agentName;
@@ -88,10 +91,11 @@ public class A2aNodeActionWithConfig implements NodeActionWithConfig {
 		this.shareState = false;
 	}
 
-	public A2aNodeActionWithConfig(AgentCardWrapper agentCard, String agentName, boolean includeContents, String outputKeyToParent, String instruction, boolean streaming, boolean shareState, CompileConfig compileConfig) {
+	public A2aNodeActionWithConfig(AgentCardWrapper agentCard, String agentName, boolean includeContents, String outputKeyToParent, String instruction, boolean streaming, boolean shareState, CompileConfig compileConfig, Supplier<String> tokenProvider) {
 		this(agentCard, agentName, includeContents, outputKeyToParent, instruction, streaming);
 		this.parentCompileConfig = compileConfig;
 		this.shareState = shareState;
+		this.tokenProvider = tokenProvider;
 	}
 
 	@Override
@@ -223,16 +227,20 @@ public class A2aNodeActionWithConfig implements NodeActionWithConfig {
 				HttpPost post = new HttpPost(baseUrl);
 				post.setHeader("Content-Type", "application/json");
 				post.setHeader("Accept", "text/event-stream");
+				if (tokenProvider != null) {
+					String token = tokenProvider.get();
+					if (StringUtils.hasText(token)) {
+						post.setHeader("Authorization", "Bearer " + token);
+					}
+				}
 				post.setEntity(new StringEntity(requestPayload, ContentType.APPLICATION_JSON));
 
 				try (CloseableHttpResponse response = httpClient.execute(post)) {
-					int statusCode = response.getStatusLine().getStatusCode();
-					if (statusCode != 200) {
-						StreamingOutput errorOutput = new StreamingOutput("HTTP request failed, status: " + statusCode,
-								"a2aNode", agentName, state);
-						queue.add(AsyncGenerator.Data.of(errorOutput));
-						return;
-					}
+				int statusCode = response.getStatusLine().getStatusCode();
+				if (statusCode != 200) {
+					String errorMessage = buildStreamingHttpErrorMessage(statusCode, response, baseUrl);
+					throw new IllegalStateException(errorMessage);
+				}	
 
 					HttpEntity entity = response.getEntity();
 					if (entity == null) {
@@ -749,12 +757,19 @@ public class A2aNodeActionWithConfig implements NodeActionWithConfig {
 		try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
 			HttpPost post = new HttpPost(baseUrl);
 			post.setHeader("Content-Type", "application/json");
+			if (tokenProvider != null) {
+				String token = tokenProvider.get();
+				if (StringUtils.hasText(token)) {
+					post.setHeader("Authorization", "Bearer " + token);
+				}
+			}
 			post.setEntity(new StringEntity(requestPayload, ContentType.APPLICATION_JSON));
 
 			try (CloseableHttpResponse response = httpClient.execute(post)) {
 				int statusCode = response.getStatusLine().getStatusCode();
 				if (statusCode != 200) {
-					throw new IllegalStateException("HTTP request failed, status: " + statusCode);
+					String errorMessage = buildHttpErrorMessage(statusCode, response, baseUrl);
+					throw new IllegalStateException(errorMessage);
 				}
 				HttpEntity entity = response.getEntity();
 				if (entity == null) {
@@ -772,4 +787,51 @@ public class A2aNodeActionWithConfig implements NodeActionWithConfig {
 		return agentCard.url();
 	}
 
+	/**
+	 * Build a descriptive error message for HTTP failures.
+	 * Provides specific guidance for authentication-related errors.
+	 */
+	private String buildHttpErrorMessage(int statusCode, CloseableHttpResponse response, String baseUrl) {
+		String reasonPhrase = response.getStatusLine().getReasonPhrase();
+		StringBuilder sb = new StringBuilder();
+		sb.append("A2A remote call failed - HTTP ").append(statusCode);
+		if (StringUtils.hasText(reasonPhrase)) {
+			sb.append(" (").append(reasonPhrase).append(")");
+		}
+		sb.append(" from ").append(baseUrl);
+
+		switch (statusCode) {
+			case 401:
+				sb.append(". Authentication failed: The request requires a valid OAuth2 token. ");
+				sb.append("Please check: (1) tokenProvider is configured, ");
+				sb.append("(2) the token is valid and not expired, ");
+				sb.append("(3) the remote server accepts the token.");
+				break;
+			case 403:
+				sb.append(". Authorization failed: The token is valid but lacks required permissions. ");
+				sb.append("Please check the token's scope/claims match the server's requirements.");
+				break;
+			case 404:
+				sb.append(". The A2A endpoint was not found. Please check the AgentCard URL is correct.");
+				break;
+			case 500:
+			case 502:
+			case 503:
+				sb.append(". The remote server encountered an error. Please check the server logs.");
+				break;
+			default:
+				sb.append(". Please check the remote server status and configuration.");
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * Build a descriptive error message for streaming HTTP failures.
+	 * Delegates to the common error message builder.
+	 */
+	private String buildStreamingHttpErrorMessage(int statusCode, CloseableHttpResponse response, String baseUrl) {
+		return buildHttpErrorMessage(statusCode, response, baseUrl);
+	}
+
 }
+

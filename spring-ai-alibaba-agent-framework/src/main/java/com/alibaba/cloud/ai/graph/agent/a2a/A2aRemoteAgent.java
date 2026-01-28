@@ -28,6 +28,7 @@ import io.a2a.spec.AgentCard;
 
 import java.util.HashMap;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 
 
@@ -44,6 +45,8 @@ public class A2aRemoteAgent extends BaseAgent {
 
 	private boolean shareState;
 
+	private Supplier<String> tokenProvider;
+
 	// Private constructor for Builder pattern
 	private A2aRemoteAgent(Builder builder) {
 		super(builder.name, builder.description, builder.includeContents, builder.returnReasoningContents, builder.outputKey, builder.outputKeyStrategy);
@@ -54,6 +57,7 @@ public class A2aRemoteAgent extends BaseAgent {
 		this.streaming = builder.streaming;
 		this.instruction = builder.instruction;
 		this.shareState = builder.shareState;
+		this.tokenProvider = builder.tokenProvider;
 	}
 
 	@Override
@@ -69,7 +73,7 @@ public class A2aRemoteAgent extends BaseAgent {
 		StateGraph graph = new StateGraph(name, this.keyStrategyFactory);
 		graph.addNode("A2aNode", AsyncNodeActionWithConfig.node_async(
 				new A2aNodeActionWithConfig(agentCard, name, includeContents, outputKey, instruction, streaming,
-						this.shareState, this.compileConfig)));
+						this.shareState, this.compileConfig, this.tokenProvider)));
 		graph.addEdge(StateGraph.START, "A2aNode");
 		graph.addEdge("A2aNode", StateGraph.END);
 		return graph;
@@ -100,7 +104,7 @@ public class A2aRemoteAgent extends BaseAgent {
 
 		public A2aRemoteAgentNode(String id, boolean includeContents, boolean returnReasoningContents, String instruction, AgentCardWrapper agentCard, boolean streaming, boolean shareState, CompiledGraph subGraph) {
 			super(Objects.requireNonNull(id, "id cannot be null"),
-					(config) -> AsyncNodeActionWithConfig.node_async(new A2aNodeActionWithConfig(agentCard, subGraph.stateGraph.getName(), includeContents, A2aRemoteAgent.this.outputKey, instruction, streaming, shareState, config)));
+					(config) -> AsyncNodeActionWithConfig.node_async(new A2aNodeActionWithConfig(agentCard, subGraph.stateGraph.getName(), includeContents, A2aRemoteAgent.this.outputKey, instruction, streaming, shareState, config, A2aRemoteAgent.this.tokenProvider)));
 			this.subGraph = subGraph;
 		}
 
@@ -139,6 +143,8 @@ public class A2aRemoteAgent extends BaseAgent {
 		private boolean streaming = false;
 
 		private boolean shareState = true;
+
+		private Supplier<String> tokenProvider;
 
 		public Builder name(String name) {
 			this.name = name;
@@ -202,6 +208,11 @@ public class A2aRemoteAgent extends BaseAgent {
 
 		public Builder shareState(boolean shareState) {
 			this.shareState = shareState;
+			return this;
+		}
+
+		public Builder tokenProvider(Supplier<String> tokenProvider) {
+			this.tokenProvider = tokenProvider;
 			return this;
 		}
 
