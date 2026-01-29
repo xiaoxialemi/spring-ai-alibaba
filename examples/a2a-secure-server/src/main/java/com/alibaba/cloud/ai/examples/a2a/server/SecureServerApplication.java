@@ -66,19 +66,24 @@ public class SecureServerApplication {
 
 	/**
 	 * 安全配置
-	 * - /.well-known/agent.json 公开访问（用于发现 Agent）
-	 * - 其他所有请求需要认证
-	 * 
-	 * JWT 验证通过 spring.security.oauth2.resourceserver.jwt.issuer-uri 自动配置
+	 * - 当 spring.ai.alibaba.a2a.security.enabled=false 时，所有请求都允许
+	 * - 当 spring.ai.alibaba.a2a.security.enabled=true（默认）时，需要 JWT 认证
+	 * - /.well-known/agent.json 始终公开访问（用于发现 Agent）
 	 */
 	@Bean
-	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-		http
-			.csrf(csrf -> csrf.disable())
-			.authorizeHttpRequests(auth -> auth
+	public SecurityFilterChain securityFilterChain(HttpSecurity http,
+			@org.springframework.beans.factory.annotation.Value("${spring.ai.alibaba.a2a.security.enabled:true}") boolean securityEnabled) throws Exception {
+		http.csrf(csrf -> csrf.disable());
+		
+		if (securityEnabled) {
+			http.authorizeHttpRequests(auth -> auth
 					.requestMatchers("/.well-known/agent.json").permitAll()
 					.anyRequest().authenticated())
-			.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
+				.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
+		} else {
+			http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+		}
+		
 		return http.build();
 	}
 }

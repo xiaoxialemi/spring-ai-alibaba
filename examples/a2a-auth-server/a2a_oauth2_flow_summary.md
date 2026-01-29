@@ -360,6 +360,9 @@ $headers = @{Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding
 $response = Invoke-RestMethod -Uri "http://localhost:9000/oauth2/token" -Method Post -Body $body -Headers $headers
 $response.access_token
 
+一条命令版
+ (Invoke-RestMethod -Uri "http://localhost:9000/oauth2/token" -Method Post -Body "grant_type=client_credentials&scope=agent.call" -Headers @{Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("a2a-client:a2a-secret"))}).access_token
+
 # 2. 通过客户端调用
 Invoke-RestMethod -Uri "http://localhost:18081/invoke?message=你好"
 ```
